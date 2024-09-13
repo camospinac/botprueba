@@ -49,19 +49,9 @@ const flowDiscord = addKeyword(['discord']).addAnswer(
 )
 
 const flowPrincipal = addKeyword(['hola', 'ole', 'alo'])
-    .addAnswer('🙌 Hola bienvenido a este *Chatbot*')
-    .addAnswer(
-        [
-            'te comparto los siguientes links de interes sobre el proyecto',
-            '👉 *doc* para ver la documentación',
-            '👉 *gracias*  para ver la lista de videos',
-            '👉 *discord* unirte al discord',
-        ],
-        null,
-        null,
-        [flowDocs, flowGracias, flowTuto, flowDiscord]
-    )
-
+    .addAnswer('Hola amor')
+    .addAnswer('Si estás leyendo esto, eres fuerte y crack, te amo')
+    .addAnswer('Ando probando automatizacion de wpp jeje')
 const main = async () => {
     const adapterDB = new MockAdapter()
     const adapterFlow = createFlow([flowPrincipal])
