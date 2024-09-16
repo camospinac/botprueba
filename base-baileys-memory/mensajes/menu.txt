@@ -2,5 +2,6 @@
 
 Opción 1 - 🍟 Menú
 Opción 2 - 🍽️ Pedir
+Opción 3 - 🔍 Buscar pedido
 
-Opción 0 - Salir
+Opción 0 - 🏃 Salir
