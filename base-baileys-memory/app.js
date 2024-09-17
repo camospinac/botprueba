@@ -9,48 +9,89 @@ const path = require("path")
 const fs = require("fs")
 const menuPath = path.join(__dirname, "mensajes", "menu.txt")
 const menu = fs.readFileSync(menuPath, "utf-8")
-
-
 const client = new Client({
-    host: "localhost",//process.env.PG_HOST,
-    user: "postgres",//process.env.PG_USER,
-    password: "postgres",//process.env.PG_PASSWORD,
-    database: "prueba",//process.env.PG_DATABASE,
-    port: "5432",//process.env.PG_PORT
+    host: 'localhost', //process.env.PG_HOST,
+    user: 'postgres',//process.env.PG_USER,
+    password: 'postgres',//process.env.PG_PASSWORD,
+    database: 'prueba',//process.env.PG_DATABASE,
+    port: '5432' //process.env.PG_PORT
 });
 
+var productosLlevar = []
+var totalventa = 0
+var nombreCliente = ''
 client.connect();
-
 const menuPdfPath = path.join(__dirname, 'menu.png');
 const flowMenu = addKeyword([EVENTS.ACTION])
-    .addAnswer('Hola buen día')
     .addAnswer('Este es nuestro menu de platos: ', {
         media: menuPdfPath
     })
 
+const flowNombreCliente = addKeyword([EVENTS.ACTION])
+    .addAnswer('Por favor, indícanos tu nombre:', { capture: true }, async (ctx, { flowDynamic, gotoFlow }) => {
+        nombreCliente = ctx.body.trim();
+        console.log(nombreCliente);
+        ctx.session = { nombreCliente, productos: [], total: 0 };
+        return gotoFlow(flowPedido);
+    });
 
 const flowSeleccionPlato = addKeyword([EVENTS.ACTION])
-    .addAnswer('Por favor, selecciona el número del plato que deseas ordenar:', { capture: true }, async (ctx, { flowDynamic }) => {
+    .addAnswer('Por favor, selecciona el número del plato que deseas ordenar:', { capture: true }, async (ctx, { flowDynamic, gotoFlow }) => {
+        if (!ctx.session) ctx.session = {};
+        if (!Array.isArray(ctx.session.productos)) {
+            ctx.session.productos = [];
+        }
+        if (typeof ctx.session.total !== 'number') {
+            ctx.session.total = 0;
+        }
         const platoId = ctx.body.trim();
-        console.log(platoId)
         try {
+
             const platoRes = await client.query('SELECT nombre, precio FROM menu WHERE id = $1', [platoId]);
             if (platoRes.rows.length === 0) {
                 return await flowDynamic('Plato no encontrado. Por favor selecciona un plato válido.');
             }
             const plato = platoRes.rows[0];
-            const numeroOrden = Math.floor(Math.random() * 1000000);
-            const estado = "Pendiente";
-            await client.query('INSERT INTO PEDIDOS (ctvo, plato, precio, estado) VALUES ($1, $2, $3, $4)', [
-                numeroOrden,
-                plato.nombre,
-                plato.precio,
-                estado
-            ]);
-            await flowDynamic(`🛒 Orden agendada correctamente, su número de orden para consultar su estado es: ${numeroOrden}, muchas gracias por comprar en Michael Burger. 🍔🍔`);
+            const precioU = parseFloat(plato.precio);
+            if (!isNaN(precioU)) {
+                productosLlevar.push({ nombre: plato.nombre, precio: precioU });
+                totalventa += precioU;
+            } else {
+                console.error("Precio no válido:", plato.precio);
+            }
+            console.log(ctx);
+            await flowDynamic(`Has añadido: ${plato.nombre} - $${plato.precio}`);
+            return gotoFlow(flowAgregarOtro);
         } catch (err) {
             console.error('Error al procesar el pedido:', err);
             await flowDynamic('Lo siento, ocurrió un error al procesar tu pedido.');
+        }
+    });
+
+const flowAgregarOtro = addKeyword([EVENTS.ACTION])
+    .addAnswer('¿Quieres agregar otro producto? (Responde "si" o "no")', { capture: true }, async (ctx, { flowDynamic, gotoFlow }) => {
+        const respuesta = ctx.body.toLowerCase().trim();
+        if (respuesta === 'si') {
+            return gotoFlow(flowPedido);
+        } else if (respuesta === 'no') {
+            try {
+                const pedidoRes = await client.query(
+                    'INSERT INTO PEDIDOS_1 (nombre_cliente, estado, fecha, metodo_pago, monto_total) VALUES ($1, $2, NOW(), $3, $4) RETURNING id',
+                    [nombreCliente, 'Pendiente', 'Efectivo', totalventa]
+                );
+                const numeroOrden = pedidoRes.rows[0].id;
+                for (const producto of productosLlevar) {
+                    await client.query('INSERT INTO PEDIDOS_2 (id_pedido, producto, precio) VALUES ($1, $2, $3)', [
+                        numeroOrden, producto.nombre, producto.precio
+                    ]);
+                }
+                await flowDynamic(`🛒 Orden agendada correctamente, su número de orden para consultar su estado es: ${numeroOrden}, muchas gracias por comprar en Michael Burger. 🍔🍔`);
+            } catch (err) {
+                console.error('Error al finalizar el pedido:', err);
+                await flowDynamic('Lo siento, ocurrió un error al finalizar tu pedido.');
+            }
+        } else {
+            await flowDynamic('Respuesta no válida. Por favor, responde "si" o "no".');
         }
     });
 
@@ -75,7 +116,7 @@ const flowConsultar = addKeyword([EVENTS.ACTION])
             const listOrden = await client.query('SELECT estado FROM pedidos WHERE ctvo = $1', [numOrder]);
             if (listOrden.rows.length === 0) {
                 await flowDynamic('Orden no encontrado. Te invitamos a ordenar nuestras deliciosas hamburguesas 🍔🍔');
-            }else{
+            } else {
                 const lista = listOrden.rows[0];
                 estatus = lista.estado;
                 await flowDynamic(`Tu pedido con número de orden ${numOrder} se encuentra con estado ${estatus}, muchas gracias por comprar en Michael Burger. 🍔🍔`);
@@ -99,7 +140,7 @@ const menuFlow = addKeyword([EVENTS.WELCOME]).addAnswer(
             case "1":
                 return gotoFlow(flowMenu);
             case "2":
-                return gotoFlow(flowPedido);
+                return gotoFlow(flowNombreCliente);
             case "3":
                 return gotoFlow(flowConsultar);
             case "0":
@@ -110,7 +151,7 @@ const menuFlow = addKeyword([EVENTS.WELCOME]).addAnswer(
 
 const main = async () => {
     const adapterDB = new MockAdapter()
-    const adapterFlow = createFlow([menuFlow, flowMenu, flowPedido, flowSeleccionPlato, flowConsultar])
+    const adapterFlow = createFlow([menuFlow, flowMenu, flowPedido, flowSeleccionPlato, flowConsultar, flowNombreCliente, flowAgregarOtro])
     const adapterProvider = createProvider(BaileysProvider)
 
     createBot({
